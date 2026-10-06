@@ -1,0 +1,22 @@
+AVENTURA DO QUADRADINHO — SERVIDOR ONLINE
+
+Este pacote está preparado para hospedagem de teste com Node.js + WebSocket.
+
+1. Coloque estes arquivos em um repositório Git:
+   - Aventura_do_Quadradinho_Multiplayer_Etapa7.html
+   - server.js
+   - package.json
+   - render.yaml
+
+2. Na hospedagem, crie um Web Service usando esse repositório.
+   Build: npm install
+   Start: npm start
+   Health check: /health
+
+3. Depois de publicado, abra o endereço HTTPS fornecido pela hospedagem.
+   O próprio jogo monta a conexão WebSocket como wss:// no endereço HTTPS.
+
+4. Teste em dois aparelhos: um cria a sala e o outro entra usando o código.
+
+Observação: a hospedagem gratuita é adequada para testes. O serviço pode dormir
+quando ficar sem tráfego e acordar quando receber uma nova conexão.

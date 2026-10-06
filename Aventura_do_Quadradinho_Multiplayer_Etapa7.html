@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
+<title>Aventura do Quadradinho - Fases e Poderes</title>
+<style>
+*{box-sizing:border-box;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}body{margin:0;background:#101827;color:#fff;font-family:Arial,sans-serif;text-align:center;overflow-x:hidden}h1{margin:14px 0 8px;font-size:25px}.hud{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin:8px}.hud span{background:#1d2a42;padding:7px 11px;border-radius:9px;font-weight:bold}.game-wrap{width:min(94vw,640px);margin:auto;position:relative}.game{display:block;width:100%;height:auto;background:#dff4ff;border:3px solid #fff;border-radius:10px;touch-action:none;-webkit-touch-callout:none;overscroll-behavior:none}.status{min-height:25px;margin:7px;font-weight:bold}.controls{display:grid;grid-template-columns:70px 70px 70px;grid-template-rows:60px 60px;gap:8px;justify-content:center;margin-top:8px}.controls button,.action{border:0;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;border-radius:12px;background:#334b73;color:#fff;font-size:25px;font-weight:bold;box-shadow:0 3px 0 #172238;touch-action:manipulation}.controls button:active,.action:active{transform:translateY(2px);box-shadow:0 1px 0 #172238}.up{grid-column:2}.left{grid-column:1;grid-row:2}.down{grid-column:2;grid-row:2}.right{grid-column:3;grid-row:2}.actions{display:flex;flex-direction:column;align-items:center;gap:12px;margin-top:28px;margin-bottom:18px}.action{font-size:17px;padding:12px 25px;min-width:190px}.power{background:#7d35c9}.power:disabled{opacity:.45}.restart{background:#e05b45}.legend{font-size:13px;opacity:.8;margin-bottom:12px}.overlay{position:absolute;inset:3px;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.65);border-radius:8px}.overlay.show{display:flex}.panel{background:#17233a;padding:22px;border-radius:16px;max-width:85%}.panel h2{margin-top:0}
+</style>
+</head>
+<body>
+<h1>🟦 Aventura do Quadradinho</h1>
+<div id="mpLobby" style="max-width:640px;margin:10px auto 14px;padding:14px;background:#17233a;border-radius:14px"><b>🌐 Multiplayer Online — Etapa 6</b><div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:10px"><button id="createRoom" class="action" style="margin:0;min-width:150px">Criar sala</button><input id="roomCode" maxlength="6" placeholder="Código" autocomplete="off" style="width:120px;border:0;border-radius:10px;padding:12px;text-align:center;font-weight:bold;text-transform:uppercase"><button id="joinRoom" class="action" style="margin:0;min-width:150px">Entrar em sala</button></div><div id="mpStatus" style="margin-top:9px;font-size:13px;opacity:.9">Desconectado do servidor</div></div>
+<div class="hud"><span>⭐ Pontos: <b id="score">0</b></span><span>❤️ Vidas: <b id="lives">3</b></span><span>🚩 Fase: <b id="phase">1</b></span><span>⚡ <b id="powerText">Nenhum</b></span></div>
+<div class="game-wrap">
+<canvas id="game" class="game" width="640" height="400"></canvas>
+<div id="overlay" class="overlay"><div class="panel"><h2>💥 Fim de jogo!</h2><p>Pontuação: <b id="finalScore">0</b></p><button class="action restart" id="restartOverlay">🔄 Jogar novamente</button></div></div>
+</div>
+<div id="status" class="status">Pegue as moedas amarelas e evite os inimigos!</div>
+<div class="controls">
+<button class="up" data-key="up">▲</button><button class="left" data-key="left">◀</button><button class="down" data-key="down">▼</button><button class="right" data-key="right">▶</button>
+</div>
+<div class="actions">
+<button class="action power" id="powerBtn" disabled>⚡ Usar poder</button>
+<button class="action restart" id="restartBtn">🔄 Reiniciar</button>
+</div>
+<div class="legend">🟣 Moeda roxa: 35% de chance de aparecer e dá um poder. Fase 10: mini-chefão sem inimigos. Depois que ele for derrotado, os inimigos voltam e se multiplicam. Fase 20: chefão final com teleporte limitado.</div>
+<script>
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const scoreEl=document.getElementById('score'),livesEl=document.getElementById('lives'),phaseEl=document.getElementById('phase'),powerText=document.getElementById('powerText'),statusEl=document.getElementById('status'),powerBtn=document.getElementById('powerBtn'),restartBtn=document.getElementById('restartBtn'),overlay=document.getElementById('overlay'),finalScore=document.getElementById('finalScore'),restartOverlay=document.getElementById('restartOverlay');
+const W=canvas.width,H=canvas.height,keys={up:false,down:false,left:false,right:false};
+const MP_SERVER=(location.protocol==='file:'?'ws://localhost:8080':(location.protocol==='https:'?'wss://':'ws://')+location.host);
+let mpSocket=null,mpRoom=null,mpId=null,mpIsHost=false,remotePlayers=new Map(),mpLastSend=0,mpLastSentState='',mpLastWorldSend=0,mpWorldVersion=0,mpClaimPending=false,mpRoomResult=null;
+const mpStatus=document.getElementById('mpStatus'),roomCodeInput=document.getElementById('roomCode'),createRoomBtn=document.getElementById('createRoom'),joinRoomBtn=document.getElementById('joinRoom');
+function mpSetStatus(t){if(mpStatus)mpStatus.textContent=t}
+function mpConnect(){if(mpSocket&&mpSocket.readyState===1)return;mpSetStatus('Conectando...');mpSocket=new WebSocket(MP_SERVER);mpSocket.onopen=()=>mpSetStatus('Conectado! Crie ou entre em uma sala.');mpSocket.onclose=()=>{mpSetStatus('Servidor desconectado');remotePlayers.clear();mpRoom=null;mpIsHost=false};mpSocket.onerror=()=>mpSetStatus('Não foi possível conectar ao servidor.');mpSocket.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(_){return}if(m.type==='welcome'){mpId=m.id}if(m.type==='room_created'||m.type==='room_joined'){mpRoom=m.room;mpIsHost=!!m.host;roomCodeInput.value=m.room;mpSetStatus('Sala '+m.room+' — '+(mpIsHost?'você é o anfitrião':'conectado como jogador')+'.')}if(m.type==='player_list'){remotePlayers=new Map(m.players.filter(p=>p.id!==mpId).map(p=>[p.id,{...p,targetX:p.x,targetY:p.y,renderX:p.x,renderY:p.y}]))}if((m.type==='player_state'||m.type==='player_update')&&m.player&&m.player.id!==mpId){const old=remotePlayers.get(m.player.id)||{};remotePlayers.set(m.player.id,{...old,...m.player,targetX:m.player.x,targetY:m.player.y,renderX:Number.isFinite(old.renderX)?old.renderX:m.player.x,renderY:Number.isFinite(old.renderY)?old.renderY:m.player.y})}if((m.type==='player_state'||m.type==='player_update')&&m.player&&m.player.gameOver&&mpIsHost&&!mpRoomResult)sendRoomResult('defeat','O outro jogador ficou sem vidas ou perdeu no parkour.');if(m.type==='player_left')remotePlayers.delete(m.id);if(m.type==='world_state'&&m.world){if(!mpIsHost&&m.version>=mpWorldVersion){mpWorldVersion=m.version;applyWorldState(m.world)}}if(m.type==='world_action'&&mpIsHost){handleWorldAction(m)}if(m.type==='world_action_result'&&m.collector===mpId){if(m.action==='collect_coin'){score++;updateHud()}if(m.action==='collect_purple'){powerCharge=true;powerType=m.powerType||'shield';statusEl.textContent=powerType==='shield'?'🛡️ Você ganhou ESCUDO!':powerType==='speed'?'⚡ Você ganhou VELOCIDADE!':'💪 Você ganhou FORÇA!';updateHud()}}if(m.type==='room_restarted'){mpRoomResult=null;mpSetStatus('Partida reiniciada pelo anfitrião.')}if(m.type==='room_result'){applyRoomResult(m.result,m.reason||'')}if(m.type==='error')mpSetStatus('⚠️ '+m.message)}}
+function mpSend(o){if(mpSocket&&mpSocket.readyState===1)mpSocket.send(JSON.stringify(o))}
+
+function applyRoomResult(result,reason=''){
+  if(mpRoomResult)return;
+  mpRoomResult=result;
+  gameOver=true;
+  parkourReady=false;
+  overlay.classList.add('show');
+  if(result==='victory'){
+    overlay.querySelector('h2').textContent='🏆 Vitória da equipe!';
+    overlay.querySelector('p').innerHTML='Os dois jogadores concluíram a aventura!<br>Pontuação: <b id="finalScore">'+score+'</b>';
+    statusEl.textContent='🏆 Vocês venceram juntos!';
+  }else{
+    overlay.querySelector('h2').textContent='💥 Derrota da equipe!';
+    overlay.querySelector('p').innerHTML=(reason||'Um dos jogadores ficou sem vidas.')+'<br>Pontuação: <b>'+score+'</b>';
+    statusEl.textContent='💥 A partida terminou para os dois jogadores.';
+  }
+  updateHud();
+}
+function sendRoomResult(result,reason=''){
+  if(!mpRoom||!mpIsHost||mpRoomResult)return;
+  mpRoomResult=result;
+  mpSend({type:'room_result',result,reason});
+  applyRoomResult(result,reason);
+}
+function mpSendPlayerState(now,force=false){if(!mpRoom||!player||(!force&&now-mpLastSend<50))return;const state={type:'player_state',room:mpRoom,x:+player.x.toFixed(2),y:+player.y.toFixed(2),phase:Number(phase)||1,score:Number(score)||0,lives:Number(lives)||0,parkour:!!parkourReady,parkourStage:Number(parkourStage)||0,gameOver:!!gameOver,onGround:!!player.onGround};const sig=JSON.stringify(state);if(!force&&sig===mpLastSentState)return;mpLastSend=now;mpLastSentState=sig;mpSend(state)}
+function worldSnapshot(){return {phase,coin:coin?{x:coin.x,y:coin.y,r:coin.r}:null,purpleCoin:purpleCoin?{x:purpleCoin.x,y:purpleCoin.y,r:purpleCoin.r}:null,enemies:enemies.map(e=>({x:e.x,y:e.y,size:e.size,vx:e.vx,vy:e.vy})),boss:boss?{x:boss.x,y:boss.y,size:boss.size,vx:boss.vx,vy:boss.vy,hits:boss.hits,maxHits:boss.maxHits,teleports:boss.teleports}:null,bossHits,coinTarget,parkourReady,parkourStage,cameraX,missiles:missiles.map(m=>({x:m.x,y:m.y,vx:m.vx,vy:m.vy,r:m.r,bomb:!!m.bomb}))}}
+function sendWorldState(force=false){if(!mpRoom||!mpIsHost||(!force&&performance.now()-mpLastWorldSend<100))return;mpLastWorldSend=performance.now();mpSend({type:'world_state',world:worldSnapshot()})}
+function applyWorldState(w){phase=w.phase||phase;coin=w.coin?{...w.coin}:null;purpleCoin=w.purpleCoin?{...w.purpleCoin}:null;enemies=Array.isArray(w.enemies)?w.enemies.map(e=>({...e})):[];boss=w.boss?{...w.boss}:null;bossHits=Number(w.bossHits)||0;coinTarget=Number(w.coinTarget)||0;parkourReady=!!w.parkourReady;parkourStage=Number(w.parkourStage)||0;missiles=Array.isArray(w.missiles)?w.missiles.map(m=>({...m})):[];updateHud()}
+function handleWorldAction(m){if(!mpRoom||!mpIsHost)return;const p=[...remotePlayers.keys()].includes(m.playerId);if(!p)return;const rp=[...remotePlayers.values()].find(x=>x.id===m.playerId);if(m.action==='collect_coin'&&coin&&!mpClaimPending){const dx=(rp?.targetX??0)-coin.x,dy=(rp?.targetY??0)-coin.y;if(Math.hypot(dx,dy)<55){mpSend({type:'world_action_result',collector:m.playerId,action:'collect_coin'});collectYellow(m.playerId);sendWorldState(true)}}if(m.action==='collect_purple'&&purpleCoin){const dx=(rp?.targetX??0)-purpleCoin.x,dy=(rp?.targetY??0)-purpleCoin.y;if(Math.hypot(dx,dy)<60){const r=Math.random(),pt=r<.34?'shield':r<.67?'speed':'strength';mpSend({type:'world_action_result',collector:m.playerId,action:'collect_purple',powerType:pt});if(m.playerId===mpId){powerCharge=true;powerType=pt}purpleCoin=null;sendWorldState(true)}}}
+function requestWorldAction(action){if(mpIsHost)return false;if(!mpRoom||mpClaimPending)return true;mpClaimPending=true;mpSend({type:'world_action',playerId:mpId,action});setTimeout(()=>mpClaimPending=false,300);return true}
+function mpCreate(){mpConnect();setTimeout(()=>mpSend({type:'create_room',name:'Jogador'}),150)}
+function mpJoin(){const code=roomCodeInput.value.trim().toUpperCase();if(!/^[A-Z0-9]{4,6}$/.test(code)){mpSetStatus('Digite um código de sala válido.');return}mpConnect();setTimeout(()=>mpSend({type:'join_room',room:code,name:'Jogador'}),150)}
+createRoomBtn.onclick=mpCreate;joinRoomBtn.onclick=mpJoin;roomCodeInput.addEventListener('input',()=>roomCodeInput.value=roomCodeInput.value.toUpperCase());mpConnect();
+
+let player,enemies,coin,purpleCoin,score,lives,phase,powerCharge,powerType,speedTimer,shield,gameOver,lastTime,coinTarget,boss,bossHits,bossTeleportTimer,platforms,door,doors,parkourStage,jumpV,missiles,parkourReady,cameraX,parkourWorldWidth;
+const BASE_ENEMY_SPEED=1.8, BOSS_SPEED=BASE_ENEMY_SPEED*4, PHASE20_CHASE_SPEED=BASE_ENEMY_SPEED*3;
+function rand(a,b){return Math.random()*(b-a)+a}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function resetPlayer(){player={x:W/2-14,y:H-65,size:28,speed:4.5,inv:0,onGround:true}}
+function enemyCount(){let start;if(phase<=4)start=1;else if(phase>=6&&phase<=9)start=6;else if(phase>=11&&phase<=19)start=11;else if(phase>=21&&phase<=29)start=21;else if(phase>=31&&phase<=40)start=31;else start=phase;return Math.min(12,Math.max(1,Math.pow(2,Math.max(0,phase-start))))}
+function makeEnemy(){let e={x:rand(20,W-44),y:rand(35,H-120),size:26,vx:rand(-BASE_ENEMY_SPEED,BASE_ENEMY_SPEED),vy:rand(-BASE_ENEMY_SPEED,BASE_ENEMY_SPEED)};if(Math.abs(e.vx)<.7)e.vx=e.vx<0?-.9:.9;if(Math.abs(e.vy)<.7)e.vy=e.vy<0?-.9:.9;return e}
+function spawnEnemies(){enemies=[];boss=null;bossHits=0;missiles=[];if(phase===10||phase===20||phase===30){boss={x:W/2-25,y:55,size:50,vx:BOSS_SPEED,vy:BOSS_SPEED*.7,hits:0,maxHits:phase===30?16:10,teleports:phase===20?6:0,teleportCooldown:3000};bossHits=boss.maxHits;bossTeleportTimer=boss.teleportCooldown}else{enemies=Array.from({length:enemyCount()},makeEnemy)}}
+function spawnYellow(){coin={x:rand(25,W-25),y:rand(35,H-80),r:10}}
+function maybePurple(){purpleCoin=Math.random()<.35?{x:rand(25,W-25),y:rand(35,H-80),r:12}:null}
+function updateHud(){scoreEl.textContent=score;livesEl.textContent=lives;phaseEl.textContent=phase;powerText.textContent=powerCharge?(powerType==='shield'?'Escudo':powerType==='speed'?'Velocidade':'Força'):'Nenhum';powerBtn.disabled=!powerCharge||gameOver}
+function setupParkour(){
+ document.querySelector('.up').textContent='🔼';platforms=[];doors=[];parkourStage=0;cameraX=0;parkourWorldWidth=W;
+ let xs=[18,82,150,220,292,360,430,498,550,590],ys=[330,275,220,290,185,245,160,230,145,90];
+ for(let i=0;i<xs.length;i++){let moving=(phase===5&&[3,6,8].includes(i));platforms.push({x:xs[i],y:ys[i],w:i===9?48:58,h:14,vx:moving?(i%2?0.9:-0.9):0,minX:Math.max(0,xs[i]-28),maxX:Math.min(W-(i===9?48:58),xs[i]+28)})}
+ doors=[{x:platforms[9].x+8,y:platforms[9].y-48,w:30,h:42,stage:0}];door=doors[0];jumpV=0;parkourReady=true;enemies=[];boss=null;coin=null;purpleCoin=null;missiles=[];
+ resetPlayer();player.x=platforms[0].x+12;player.y=platforms[0].y-player.size;player.onGround=true;
+ statusEl.textContent=phase===11?'🟦 PARKOUR FASE 11! Primeiro, faça o parkour da fase 5 e passe pela primeira porta 🚪.':'🟦 PARKOUR FASE 5! Pule pelas plataformas e chegue à porta 🚪. Se cair, você perde!';updateHud()
+}
+function startPhase11SecondParkour(){
+ parkourStage=1;cameraX=0;
+ const data=[[18,325,58,0],[92,270,58,0],[166,215,56,-0.9],[240,290,58,0],[316,225,58,1],[392,165,54,0],[468,235,58,-1],[548,185,54,0],[626,125,56,0.9],[706,205,58,0],[790,150,54,-1],[870,95,54,0],[950,175,58,1],[1034,120,54,0],[1112,235,58,-1],[1192,175,56,0],[1270,105,54,1],[1350,190,58,0],[1432,135,56,-1],[1510,80,54,0],[1590,155,58,1.1],[1675,235,54,0],[1760,170,58,-1],[1848,105,56,0]];
+ platforms=data.map(a=>({x:a[0],y:a[1],w:a[2],h:14,vx:a[3],minX:a[0]-28,maxX:a[0]+28}));parkourWorldWidth=1950;doors=[{x:1858,y:57,w:30,h:42,stage:1}];door=doors[0];player.x=platforms[0].x+12;player.y=platforms[0].y-player.size;player.onGround=true;jumpV=0;statusEl.textContent='🚪 Primeira porta! Agora começa o segundo parkour, muito maior! Avance pelas plataformas até a última porta 🚪.';
+}
+function enterPhase(p){phase=p;if(phase!==5&&phase!==11)document.querySelector('.up').textContent='▲';if(phase===5||phase===11){setupParkour();return}parkourReady=false;door=null;spawnEnemies();resetPlayer();coinTarget=phase===10?bossHits:phase===20?bossHits:phase===30?bossHits:5;spawnYellow();maybePurple();
+if(phase===10)statusEl.textContent='👑 CHEFÃO DA FASE 10! 4x de velocidade. Pegue 10 moedas para derrotá-lo!';
+else if(phase===20)statusEl.textContent='👑 CHEFÃO DA FASE 20! 3x de velocidade, perseguição, teleporte e bombas!';
+else if(phase===30)statusEl.textContent='👑 CHEFÃO DA FASE 30! 4x de velocidade, muita vida e mísseis rápidos!';
+else statusEl.textContent='🚩 Fase '+phase+'! '+enemyCount()+' inimigo'+(enemyCount()>1?'s':'')+'!';updateHud();sendWorldState(true)}
+function nextPhase(){if(mpRoom&&!mpIsHost)return;if(phase>=40){statusEl.textContent='🏆 Vocês chegaram à fase 40!';gameOver=true;if(mpRoom&&mpIsHost)sendRoomResult('victory','A equipe chegou à fase 40.');return}enterPhase(phase+1)}
+function collectYellow(collectorId=mpId){if(!collectorId||collectorId===mpId)score++;if(boss){bossHits--;boss.hits=boss.maxHits-bossHits;coinTarget=bossHits;spawnYellow();if(bossHits<=0){statusEl.textContent='🎉 Chefão derrotado!';nextPhase()}else{statusEl.textContent='💥 Acertou! Faltam '+bossHits+' moedas!'}}else{coinTarget--;spawnYellow();maybePurple();if(coinTarget<=0)nextPhase()}updateHud()}
+function collectPurple(collectorId=mpId){let got=false;if(collectorId===mpId){powerCharge=true;let r=Math.random();powerType=r<.34?'shield':r<.67?'speed':'strength';got=true}purpleCoin=null;if(got)statusEl.textContent=powerType==='shield'?'🛡️ Você ganhou ESCUDO!':powerType==='speed'?'⚡ Você ganhou VELOCIDADE!':'💪 Você ganhou FORÇA!';updateHud()}
+function usePower(){if(!powerCharge||gameOver)return;let p=powerType;powerCharge=false;powerType=null;if(p==='shield'){shield=true;statusEl.textContent='🛡️ Escudo ativado!'}else if(p==='speed'){speedTimer=7000;statusEl.textContent='⚡ Velocidade ativada por 7 segundos!'}else{player.strength=true;statusEl.textContent='💪 FORÇA ativada! Inimigos comuns que encostarem em você desaparecem; chefões perdem 1 vida.'}updateHud()}
+function loseLife(){if(player.inv>0)return;if(player.strength&&enemies.length){let i=enemies.findIndex(e=>player.x<e.x+e.size&&player.x+player.size>e.x&&player.y<e.y+e.size&&player.y+player.size>e.y);if(i>=0){enemies.splice(i,1);statusEl.textContent='💥 A força eliminou o inimigo!';return}}if(shield){shield=false;player.inv=1200;statusEl.textContent='🛡️ O escudo bloqueou o ataque!';return}lives--;player.inv=1400;resetPlayer();player.inv=1400;if(lives<=0){gameOver=true;finalScore.textContent=score;overlay.classList.add('show');statusEl.textContent='Fim de jogo!';if(mpRoom&&mpIsHost)sendRoomResult('defeat','Um dos jogadores ficou sem vidas.');}else statusEl.textContent='💔 Você perdeu uma vida!';updateHud()}
+function jump(){if(!parkourReady||gameOver)return;if(player.onGround){jumpV=-8.8;player.onGround=false}}
+function rectHit(a,b){return a.x<b.x+b.w&&a.x+a.size>b.x&&a.y<b.y+b.h&&a.y+a.size>b.y}
+function parkourLose(){if(mpRoom&&!mpIsHost){statusEl.textContent='💥 Você caiu! Aguardando o estado da sala...';mpSend({type:'player_event',event:'parkour_fall'});return}gameOver=true;parkourReady=false;finalScore.textContent=score;overlay.classList.add('show');statusEl.textContent='💥 Você perdeu! Caiu do parkour.';if(mpRoom&&mpIsHost)sendRoomResult('defeat','Um dos jogadores caiu no parkour.');updateHud()}
+function updateParkour(dt){
+ let sp=speedTimer>0?7:4.5,dx=(keys.right?1:0)-(keys.left?1:0);player.x+=dx*sp*(dt/16);
+ const maxX=phase===11&&parkourStage===1?parkourWorldWidth-player.size:W-player.size;player.x=Math.max(0,Math.min(maxX,player.x));
+ for(const p of platforms)if(p.vx){p.x+=p.vx*(dt/16);if(p.x<=p.minX){p.x=p.minX;p.vx=Math.abs(p.vx)}else if(p.x>=p.maxX){p.x=p.maxX;p.vx=-Math.abs(p.vx)}}
+ cameraX=(phase===11&&parkourStage===1)?Math.max(0,Math.min(parkourWorldWidth-W,player.x-W*.38)):0;
+ jumpV+=.42*(dt/16);player.y+=jumpV*(dt/16);player.onGround=false;
+ for(const p of platforms)if(player.x+player.size>p.x&&player.x<p.x+p.w&&player.y+player.size>=p.y&&player.y+player.size<=p.y+18&&jumpV>=0){player.y=p.y-player.size;jumpV=0;player.onGround=true}
+ if(player.y>H+20){parkourLose();return}
+ if(door&&rectHit(player,door)){if(mpRoom&&!mpIsHost){statusEl.textContent='🚪 Porta alcançada! Aguardando o anfitrião...';return}if(phase===11&&parkourStage===0){startPhase11SecondParkour();return}statusEl.textContent=phase===11?'🏆 Última porta! Indo para a fase 12...':'🚪 Porta encontrada! Indo para a fase 6...';setTimeout(()=>{if(!gameOver)nextPhase()},350);parkourReady=false;return}
+ if(Math.random()<.012*(dt/16)&&missiles.length<3)missiles.push({x:rand(0,W),y:-12,vx:rand(-.5,.5),vy:1.7,r:7});for(let i=missiles.length-1;i>=0;i--){let m=missiles[i];m.x+=m.vx*(dt/16);m.y+=m.vy*(dt/16);if(m.y>H+20){missiles.splice(i,1);continue}if(player.inv<=0&&dist({x:player.x-cameraX+14,y:player.y+14},m)<22){missiles.splice(i,1);loseLife()}}
+}
+function update(dt){if(gameOver){mpSendPlayerState(performance.now(),true);return}
+mpSendPlayerState(performance.now());
+if(parkourReady){updateParkour(dt);return}const s=speedTimer>0?8:4.5;let dx=(keys.right?1:0)-(keys.left?1:0),dy=(keys.down?1:0)-(keys.up?1:0);if(dx||dy){const len=Math.hypot(dx,dy);player.x+=dx/len*s*(dt/16);player.y+=dy/len*s*(dt/16)}player.x=Math.max(0,Math.min(W-player.size,player.x));player.y=Math.max(0,Math.min(H-player.size,player.y));if(speedTimer>0){speedTimer-=dt;if(speedTimer<=0)statusEl.textContent='Velocidade acabou.'}if(player.inv>0)player.inv-=dt;
+if(mpRoom&&!mpIsHost){if(coin&&dist({x:player.x+14,y:player.y+14},coin)<23)requestWorldAction('collect_coin');if(purpleCoin&&dist({x:player.x+14,y:player.y+14},purpleCoin)<25)requestWorldAction('collect_purple');updateHud();return}
+for(let i=enemies.length-1;i>=0;i--){const e=enemies[i];e.x+=e.vx*(dt/16);e.y+=e.vy*(dt/16);if(e.x<=0){e.x=0;e.vx=Math.abs(e.vx)}else if(e.x+e.size>=W){e.x=W-e.size;e.vx=-Math.abs(e.vx)}if(e.y<=0){e.y=0;e.vy=Math.abs(e.vy)}else if(e.y+e.size>=H){e.y=H-e.size;e.vy=-Math.abs(e.vy)};if(player.x<e.x+e.size&&player.x+player.size>e.x&&player.y<e.y+e.size&&player.y+player.size>e.y){if(player.strength){enemies.splice(i,1);score+=1;statusEl.textContent='💪 Inimigo derrotado pela FORÇA!';continue}if(player.inv<=0)loseLife()}}
+if(boss){boss.x+=boss.vx*(dt/16);boss.y+=boss.vy*(dt/16);if(boss.x<=0){boss.x=0;boss.vx=Math.abs(boss.vx)}else if(boss.x+boss.size>=W){boss.x=W-boss.size;boss.vx=-Math.abs(boss.vx)}if(boss.y<=0){boss.y=0;boss.vy=Math.abs(boss.vy)}else if(boss.y+boss.size>=H){boss.y=H-boss.size;boss.vy=-Math.abs(boss.vy)};bossTeleportTimer-=dt;if(phase===20&&bossTeleportTimer<=0&&boss.teleports>0){boss.x=rand(25,W-boss.size-25);boss.y=rand(35,H-160);boss.teleports--;bossTeleportTimer=boss.teleportCooldown;statusEl.textContent='✨ O chefão se teletransportou!'}if(player.x<boss.x+boss.size&&player.x+player.size>boss.x&&player.y<boss.y+boss.size&&player.y+player.size>boss.y){if(player.strength&&(!boss.strengthCooldown||boss.strengthCooldown<=0)){bossHits=Math.max(0,bossHits-1);boss.strengthCooldown=900;statusEl.textContent='💪 A FORÇA atingiu o chefão! Ele perdeu 1 vida!';if(bossHits<=0){nextPhase()}}else if(player.inv<=0)loseLife()}if(boss.strengthCooldown>0)boss.strengthCooldown-=dt;if(phase===30&&Math.random()<0.018*(dt/16)&&missiles.length<5){let a=Math.atan2((player.y+14)-(boss.y+25),(player.x+14)-(boss.x+25));missiles.push({x:boss.x+25,y:boss.y+25,vx:Math.cos(a)*5.2,vy:Math.sin(a)*5.2,r:6})}}
+for(let i=missiles.length-1;i>=0;i--){let m=missiles[i];m.x+=m.vx*(dt/16);m.y+=m.vy*(dt/16);if(m.x<-30||m.x>W+30||m.y<-30||m.y>H+30){missiles.splice(i,1);continue}if(player.inv<=0&&dist({x:player.x+14,y:player.y+14},m)<22){missiles.splice(i,1);loseLife()}}
+if(coin&&dist({x:player.x+14,y:player.y+14},coin)<23){if(mpRoom&&!mpIsHost){requestWorldAction('collect_coin')}else{coin=null;collectYellow(mpId);sendWorldState(true)}}if(purpleCoin&&dist({x:player.x+14,y:player.y+14},purpleCoin)<25){if(mpRoom&&!mpIsHost){requestWorldAction('collect_purple')}else{const r=Math.random(),pt=r<.34?'shield':r<.67?'speed':'strength';powerCharge=true;powerType=pt;purpleCoin=null;statusEl.textContent=pt==='shield'?'🛡️ Você ganhou ESCUDO!':pt==='speed'?'⚡ Você ganhou VELOCIDADE!':'💪 Você ganhou FORÇA!';if(mpRoom)mpSend({type:'world_action_result',collector:mpId,action:'collect_purple',powerType:pt});sendWorldState(true)}}if(mpIsHost)sendWorldState();updateHud()}
+
+function draw(){
+ctx.clearRect(0,0,W,H);
+ctx.fillStyle='#dff4ff';ctx.fillRect(0,0,W,H);
+ctx.strokeStyle='rgba(30,90,120,.08)';
+for(let x=0;x<W;x+=32){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}
+for(let y=0;y<H;y+=32){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+
+if(parkourReady){
+  const scroll=(phase===11&&parkourStage===1)?cameraX:0;
+  if(phase===11&&parkourStage===1){
+    ctx.fillStyle='#b9d9e8';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(70,100,120,.12)';
+    ctx.fillRect(0,0,10,H);
+  }
+  ctx.fillStyle='#6b4f32';
+  for(const p of platforms){
+    const sx=p.x-scroll;
+    if(sx+p.w<-20||sx>W+20) continue;
+    ctx.fillRect(sx,p.y,p.w,p.h);
+    ctx.fillStyle='#3f2f20';ctx.fillRect(sx,p.y,p.w,4);
+    if(p.vx){ctx.fillStyle='#f2c94c';ctx.fillRect(sx+8,p.y-3,p.w-16,3)}
+    ctx.fillStyle='#6b4f32';
+  }
+  for(const d of doors){
+    const sx=d.x-scroll;
+    if(sx+d.w<-20||sx>W+20) continue;
+    ctx.fillStyle='#8b5a2b';ctx.fillRect(sx,d.y,d.w,d.h);
+    ctx.fillStyle='#222';ctx.beginPath();ctx.arc(sx+9,d.y+22,3,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 13px Arial';ctx.fillText('🚪',sx-3,d.y-7);
+  }
+  ctx.fillStyle='#234';ctx.font='bold 14px Arial';
+  ctx.fillText(
+    phase===11
+      ? (parkourStage===0?'FASE 11 — 1º parkour: igual à fase 5':'FASE 11 — 2º parkour: parte longa')
+      : '10 plataformas — pule com 🔼',12,22
+  );
+}else{
+  if(coin){
+    ctx.fillStyle='#ffd52e';ctx.beginPath();ctx.arc(coin.x,coin.y,coin.r,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#b88700';ctx.stroke();
+  }
+  if(purpleCoin){
+    ctx.fillStyle='#9b4dff';ctx.beginPath();ctx.arc(purpleCoin.x,purpleCoin.y,purpleCoin.r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#e8cfff';ctx.font='bold 13px Arial';ctx.textAlign='center';ctx.fillText('★',purpleCoin.x,purpleCoin.y+5);
+  }
+  for(const e of enemies){
+    ctx.fillStyle='#ef3e3e';ctx.fillRect(e.x,e.y,e.size,e.size);
+    ctx.fillStyle='#fff';ctx.fillRect(e.x+6,e.y+6,5,5);ctx.fillRect(e.x+15,e.y+6,5,5);
+  }
+  if(boss){
+    ctx.fillStyle=phase===30?'#b11':'#c22';ctx.fillRect(boss.x,boss.y,boss.size,boss.size);
+    ctx.fillStyle='#fff';ctx.fillRect(boss.x+9,boss.y+9,7,7);ctx.fillRect(boss.x+34,boss.y+9,7,7);
+    ctx.fillStyle='#222';ctx.font='bold 12px Arial';ctx.textAlign='center';ctx.fillText('👑',boss.x+boss.size/2,boss.y-7);
+  }
+  for(const m of missiles){
+    ctx.fillStyle=m.bomb?'#333':'#e33';ctx.beginPath();ctx.arc(m.x,m.y,m.r,0,Math.PI*2);ctx.fill();
+    if(m.bomb){ctx.fillStyle='#ffb000';ctx.fillRect(m.x-2,m.y-m.r-4,4,4)}
+  }
+  ctx.fillStyle='#234';ctx.font='bold 15px Arial';ctx.textAlign='left';
+  ctx.fillText(boss?'❤️ Vida do chefão: '+bossHits+' | Moedas restantes: '+coinTarget:'🪙 Moedas até a próxima fase: '+coinTarget,12,22);
+  if(player.strength){
+    ctx.strokeStyle='#ffcf33';ctx.lineWidth=4;ctx.beginPath();ctx.arc(player.x+14,player.y+14,23,0,Math.PI*2);ctx.stroke();
+  }
+}
+
+ctx.save();
+if(player.inv>0&&Math.floor(player.inv/100)%2===0)ctx.globalAlpha=.35;
+ctx.fillStyle='#1687ff';
+const px=parkourReady?(player.x-((phase===11&&parkourStage===1)?cameraX:0)):player.x;
+ctx.fillRect(px,player.y,player.size,player.size);
+if(shield){
+  ctx.strokeStyle='#5ee7ff';ctx.lineWidth=5;ctx.beginPath();ctx.arc(px+14,player.y+14,23,0,Math.PI*2);ctx.stroke();
+}
+ctx.restore();
+for(const rp of remotePlayers.values()){if(rp.phase!==phase)continue;const rpx=(phase===11&&rp.parkour&&rp.parkourStage===1)?rp.renderX-cameraX:rp.renderX;const rpy=rp.renderY;if(rpx+28<0||rpx>W||rpy+28<0||rpy>H)continue;ctx.fillStyle='#00b894';ctx.fillRect(rpx,rpy,28,28);ctx.fillStyle='#123';ctx.font='bold 11px Arial';ctx.textAlign='center';ctx.fillText(rp.id===mpId?'P1':'P2',rpx+14,rpy-5);ctx.font='10px Arial';ctx.fillText('❤️ '+(rp.lives??3)+'  ⭐ '+(rp.score??0),rpx+14,rpy+40)}
+ctx.textAlign='left';
+}
+function updateRemotePlayers(){for(const rp of remotePlayers.values()){rp.renderX+=(rp.targetX-rp.renderX)*0.35;rp.renderY+=(rp.targetY-rp.renderY)*0.35}}
+function loop(t){if(!lastTime)lastTime=t;const dt=Math.min(40,t-lastTime);lastTime=t;update(dt);updateRemotePlayers();draw();requestAnimationFrame(loop)}
+function start(){if(mpRoom&&mpIsHost&&mpRoomResult)mpSend({type:'room_restart'});score=0;lives=3;phase=1;mpLastSentState='';mpRoomResult=null;powerCharge=false;powerType=null;speedTimer=0;shield=false;gameOver=false;coinTarget=5;boss=null;bossHits=0;bossTeleportTimer=0;platforms=[];doors=[];door=null;parkourStage=0;cameraX=0;parkourWorldWidth=W;missiles=[];parkourReady=false;resetPlayer();player.strength=false;enterPhase(1);overlay.classList.remove('show');lastTime=0}
+function setKey(k,v){keys[k]=v}
+document.querySelectorAll('[data-key]').forEach(b=>{
+  const k=b.dataset.key;
+  b.addEventListener('contextmenu',e=>e.preventDefault());
+  b.addEventListener('selectstart',e=>e.preventDefault());
+  b.addEventListener('dragstart',e=>e.preventDefault());
+  b.addEventListener('pointerdown',e=>{
+    if(e.cancelable)e.preventDefault();
+    if(b.setPointerCapture)try{b.setPointerCapture(e.pointerId)}catch(_){}
+    if(k==='up'&&parkourReady)jump();else setKey(k,true);
+  },{passive:false});
+  ['pointerup','pointercancel','pointerleave','lostpointercapture'].forEach(ev=>{
+    b.addEventListener(ev,e=>{
+      if(e.cancelable)e.preventDefault();
+      setKey(k,false);
+    },{passive:false});
+  });
+  b.addEventListener('touchstart',e=>{if(e.cancelable)e.preventDefault()},{passive:false});
+});
+document.addEventListener('touchmove',e=>{
+  if(e.target.closest('.controls,.actions,.game') && e.cancelable)e.preventDefault();
+},{passive:false});
+document.addEventListener('gesturestart',e=>{if(e.cancelable)e.preventDefault()},{passive:false});
+
+window.addEventListener('keydown',e=>{const m={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right',w:'up',s:'down',a:'left',d:'right'};if(m[e.key]){e.preventDefault();if(m[e.key]==='up'&&parkourReady)jump();else setKey(m[e.key],true)}});window.addEventListener('keyup',e=>{const m={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right',w:'up',s:'down',a:'left',d:'right'};if(m[e.key])setKey(m[e.key],false)});
+powerBtn.addEventListener('click',usePower);restartBtn.addEventListener('click',start);restartOverlay.addEventListener('click',start);start();requestAnimationFrame(loop);
+</script>
+</body></html>

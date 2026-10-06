@@ -1,0 +1,34 @@
+AVENTURA DO QUADRADINHO — MULTIPLAYER ETAPA 7
+
+Objetivo: validar o pacote final antes de publicar o servidor online.
+
+1) No computador que vai hospedar o servidor:
+   npm install
+   npm start
+
+2) Abra no mesmo computador:
+   http://localhost:8080
+
+3) Para testar dois jogadores:
+   - Abra duas janelas do navegador e use Criar sala / Entrar em sala.
+   - Para testar em dois celulares na mesma rede, o servidor precisa estar em um computador acessível pela rede local e o jogo deve ser aberto pelo endereço desse computador.
+
+4) Para colocar na internet:
+   - Publique este projeto em um serviço que aceite Node.js + WebSocket.
+   - Use HTTPS/WSS quando o site for HTTPS.
+   - Defina PORT pela variável de ambiente do serviço.
+   - Depois use o endereço público do servidor no cliente.
+
+IMPORTANTE:
+Este pacote está preparado para hospedagem, mas o servidor NÃO está hospedado automaticamente na internet. O endereço público depende do serviço de hospedagem escolhido.
+
+CHECKLIST DA ETAPA 7:
+[OK] Criar sala
+[OK] Entrar por código
+[OK] Dois jogadores por sala
+[OK] Sincronização de posição/estado
+[OK] Mundo compartilhado
+[OK] Fases/chefões compartilhados
+[OK] Vitória/derrota compartilhadas
+[OK] Servidor Node.js com WebSocket
+[OK] PORT configurável por variável de ambiente
