@@ -27,6 +27,15 @@
 <div class="legend">🟣 Moeda roxa: 35% de chance de aparecer e dá um poder. Fase 10: mini-chefão sem inimigos. Depois que ele for derrotado, os inimigos voltam e se multiplicam. Fase 20: chefão final com teleporte limitado.</div>
 <script src="https://aventura-do-quadradinho-online-1.onrender.com/socket.io/socket.io.js"></script>
 <script>
+const socket = io("https://aventura-do-quadradinho-online-1.onrender.com");
+
+socket.on("connect", () => {
+    console.log("Conectado ao servidor!");
+});
+
+socket.on("disconnect", () => {
+    console.log("Desconectado do servidor.");
+});
 const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
 const scoreEl=document.getElementById('score'),livesEl=document.getElementById('lives'),phaseEl=document.getElementById('phase'),powerText=document.getElementById('powerText'),statusEl=document.getElementById('status'),powerBtn=document.getElementById('powerBtn'),restartBtn=document.getElementById('restartBtn'),overlay=document.getElementById('overlay'),finalScore=document.getElementById('finalScore'),restartOverlay=document.getElementById('restartOverlay');
 const W=canvas.width,H=canvas.height,keys={up:false,down:false,left:false,right:false};
