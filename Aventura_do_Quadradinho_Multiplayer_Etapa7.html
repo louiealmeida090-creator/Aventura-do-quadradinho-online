@@ -39,7 +39,7 @@ socket.on("disconnect", () => {
 const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
 const scoreEl=document.getElementById('score'),livesEl=document.getElementById('lives'),phaseEl=document.getElementById('phase'),powerText=document.getElementById('powerText'),statusEl=document.getElementById('status'),powerBtn=document.getElementById('powerBtn'),restartBtn=document.getElementById('restartBtn'),overlay=document.getElementById('overlay'),finalScore=document.getElementById('finalScore'),restartOverlay=document.getElementById('restartOverlay');
 const W=canvas.width,H=canvas.height,keys={up:false,down:false,left:false,right:false};
-const MP_SERVER=(location.protocol==='file:'?'ws://localhost:8080':(location.protocol==='https:'?'wss://':'ws://')+location.host);
+const MP_SERVER='wss://aventura-do-quadradinho-online-1.onrender.com';
 let mpSocket=null,mpRoom=null,mpId=null,mpIsHost=false,remotePlayers=new Map(),mpLastSend=0,mpLastSentState='',mpLastWorldSend=0,mpWorldVersion=0,mpClaimPending=false,mpRoomResult=null;
 const mpStatus=document.getElementById('mpStatus'),roomCodeInput=document.getElementById('roomCode'),createRoomBtn=document.getElementById('createRoom'),joinRoomBtn=document.getElementById('joinRoom');
 function mpSetStatus(t){if(mpStatus)mpStatus.textContent=t}
